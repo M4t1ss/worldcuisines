@@ -8,6 +8,9 @@ import math
 from io import BytesIO
 from tqdm import tqdm
 import os
+import zipfile
+import pandas as pd
+import re
 
 MODEL_HANDLE = {}
 
@@ -49,12 +52,17 @@ def get_vqa_from_hf(task):
         vqa = load_dataset("world-cuisines/vqa", name="task1")
     elif task == 2:
         vqa = load_dataset("world-cuisines/vqa", name="task2")
+    elif task == 3:
+        vqa = load_dataset("matiss/Latvian-Twitter-Eater-Corpus-Images")
     else:
         raise ValueError(
             "Invalid task number. Please choose from 1 (dish name) or 2 (region)"
         )
 
-    vqa_data = vqa["test_large"].to_pandas()
+    if task == 3:
+        vqa_data = vqa["test"].to_pandas()
+    else:
+        vqa_data = vqa["test_large"].to_pandas()
     return vqa_data
 
 
@@ -77,9 +85,9 @@ def get_unique_filename(path: str):
 def export_result(result: list, path: str, replace=False):
     """Export results to a file, ensuring unique file names."""
     path = path if replace else get_unique_filename(path)
-    with open(path, "w") as outfile:
+    with open(path, "w", encoding='utf8') as outfile:
         for entry in result:
-            json.dump(entry, outfile)
+            json.dump(entry, outfile, ensure_ascii=False)
             outfile.write("\n")
 
 
@@ -99,8 +107,9 @@ def main(task, qa_type, model_path, fp32, multi_gpu, limit=np.inf,
          st_idx=None, ed_idx=None, chunk_num=1, chunk_id=0):
     set_all_seed()
 
-    kb_data = get_kb_from_hf()
-    url_jpg_map = get_url_jpg_map(kb_data)
+    if task != 3:
+        kb_data = get_kb_from_hf()
+        url_jpg_map = get_url_jpg_map(kb_data)
     vqa_data = get_vqa_from_hf(task)
 
     suffix_slice = ""
@@ -131,27 +140,82 @@ def main(task, qa_type, model_path, fp32, multi_gpu, limit=np.inf,
         export_result(list_res, f"{pref}_pred_{suf}{cur_suf}.jsonl", replace=True)
 
     try:
-        for _, row in tqdm(vqa_data.iterrows(), total=len(vqa_data)):
-            res = {}
-            try:
-                image_file = url_jpg_map[row["image_url"]]
-                query = row["multi_choice_prompt"] if qa_type == "mc" else row["open_ended_prompt"]
-                response = eval_instance(model, processor, image_file, query)
+        if task == 3:
+            if qa_type == "tr":
+                tweet_df = pd.read_csv('data.tsv', sep='\t', header=0)
+            for _, row in tqdm(vqa_data.iterrows(), total=len(vqa_data)):
+                res = {}
+                try:
+                    zip_path = row["image"]["path"].split('::')[1]
+                    img_path = row["image"]["path"].split('::')[0].replace("zip://","")
+                    with zipfile.ZipFile(zip_path, 'r') as z:
+                        with z.open(img_path) as img_file:
+                            # Load the image using PIL
+                            image_file = Image.open(img_file)
+                            if image_file.format == 'PNG':
+                                if image_file.mode != 'RGBA':
+                                  image_file.convert("RGBA")
 
-                res["qa_id"] = row["qa_id"]
-                res["prediction"] = response
-                res["lang"] = row["lang"]
-                qa_type_txt = "answer" if qa_type == "oe" else "multi_choice_answer"
-                res[qa_type_txt] = row[qa_type_txt]
-                list_res.append(res)
+                            if qa_type == "lv":
+                                #Remove URLs from the text
+                                text = re.sub(r'^https?:\/\/.*[\r\n]*', '', row["text"], flags=re.MULTILINE)
+                                given = 'Ņemot vērā šādu tekstu, kas izgūts no tvīta latviešu valodā: \n'+text+'\n'
+                                answer = 'Atbildi “Jā” vai “Nē”.'
+                                query1 = given + ' Vai šis attēls papildina teksta nozīmi? ' + answer
+                                query2 = given + ' Vai šis teksts tiek pārstāvēts attēlā? ' + answer
+                            elif qa_type == "en" or qa_type == "tr":
+                                if qa_type == "tr":
+                                    tweet = tweet_df[tweet_df['TweetId'] == int(row["tweet_id"])]
+                                    translation = tweet["English"].values[0]
+                                    #Remove URLs from the text
+                                    translation = re.sub(r'^https?:\/\/.*[\r\n]*', '', translation, flags=re.MULTILINE)
+                                    given = 'Given the following text, extracted from a tweet in English: \n'+translation+'\n'
+                                else:
+                                    text = re.sub(r'^https?:\/\/.*[\r\n]*', '', row["text"], flags=re.MULTILINE)
+                                    given = 'Given the following text, extracted from a tweet in Latvian: \n'+text+'\n'
+                                answer = "Reply “Yes” or “No”."
+                                query1 = given + ' Is the image adding to the text meaning? ' + answer
+                                query2 = given + ' Is the text represented in the image? ' + answer
 
-            except Exception as e:
-                _log_error(f"Error at row {row['qa_id']} ({row['lang']}): {str(e)}", f"latest")
-                error_counter += 1
+                            res["id"] = row["tweet_id"]
+                            response = eval_instance(model, processor, image_file, query1)
+                            res["adds"] = response
+                            response = eval_instance(model, processor, image_file, query2)
+                            res["repr"] = response
 
-            count += 1
-            if count == limit:
-                break
+
+                            list_res.append(res)
+
+                except Exception as e:
+                    _log_error(f"Error at row {row['tweet_id']} : {str(e)}", f"latest")
+                    error_counter += 1
+
+                count += 1
+                if count == limit:
+                    break
+        else:
+            for _, row in tqdm(vqa_data.iterrows(), total=len(vqa_data)):
+                res = {}
+                try:
+                    image_file = url_jpg_map[row["image_url"]]
+                    print(row["image_url"])
+                    query = row["multi_choice_prompt"] if qa_type == "mc" else row["open_ended_prompt"]
+                    response = eval_instance(model, processor, image_file, query)
+
+                    res["qa_id"] = row["qa_id"]
+                    res["prediction"] = response
+                    res["lang"] = row["lang"]
+                    qa_type_txt = "answer" if qa_type == "oe" else "multi_choice_answer"
+                    res[qa_type_txt] = row[qa_type_txt]
+                    list_res.append(res)
+
+                except Exception as e:
+                    _log_error(f"Error at row {row['qa_id']} ({row['lang']}): {str(e)}", f"latest")
+                    error_counter += 1
+
+                count += 1
+                if count == limit:
+                    break
 
     except KeyboardInterrupt:
         print("KeyboardInterrupt. Exporting latest results...")
