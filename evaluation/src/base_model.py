@@ -10,6 +10,7 @@ from tqdm import tqdm
 import os
 import zipfile
 import pandas as pd
+import re
 
 MODEL_HANDLE = {}
 
@@ -126,7 +127,7 @@ def main(task, qa_type, model_path, fp32, multi_gpu, limit=np.inf,
         vqa_data = vqa_data.loc[chunk_index]
         suffix_slice += f".chunk{chunk_id}_of_{chunk_num}"
 
-    model, processor = load_model_processor(model_path, fp32, multi_gpu)
+    model, processor, tokenizer = load_model_processor(model_path, fp32, multi_gpu)
 
     list_res = []
     count = 0
@@ -156,17 +157,22 @@ def main(task, qa_type, model_path, fp32, multi_gpu, limit=np.inf,
                                   image_file.convert("RGBA")
 
                             if qa_type == "lv":
-                                given = 'Ņemot vērā doto tekstu no tvīta latviešu valodā: '+row["text"]
-                                answer = 'Atbildi ar “Jā” vai “Nē”.'
-                                query1 = given + ' Vai dotais attēls papildina teksta nozīmi? ' + answer
-                                query2 = given + ' Vai šis teksts tiek pārstāvēts dotajā attēlā? ' + answer
+                                #Remove URLs from the text
+                                text = re.sub(r'^https?:\/\/.*[\r\n]*', '', row["text"], flags=re.MULTILINE)
+                                given = 'Ņemot vērā šādu tekstu, kas izgūts no tvīta latviešu valodā: \n'+text+'\n'
+                                answer = 'Atbildi “Jā” vai “Nē”.'
+                                query1 = given + ' Vai šis attēls papildina teksta nozīmi? ' + answer
+                                query2 = given + ' Vai šis teksts tiek pārstāvēts attēlā? ' + answer
                             elif qa_type == "en" or qa_type == "tr":
                                 if qa_type == "tr":
                                     tweet = tweet_df[tweet_df['TweetId'] == int(row["tweet_id"])]
                                     translation = tweet["English"].values[0]
+                                    #Remove URLs from the text
+                                    translation = re.sub(r'^https?:\/\/.*[\r\n]*', '', translation, flags=re.MULTILINE)
                                     given = 'Given the following text, extracted from a tweet in English: \n'+translation+'\n'
                                 else:
-                                    given = 'Given the following text, extracted from a tweet in Latvian: \n'+row["text"]+'\n'
+                                    text = re.sub(r'^https?:\/\/.*[\r\n]*', '', row["text"], flags=re.MULTILINE)
+                                    given = 'Given the following text, extracted from a tweet in Latvian: \n'+text+'\n'
                                 answer = "Reply “Yes” or “No”."
                                 query1 = given + ' Is the image adding to the text meaning? ' + answer
                                 query2 = given + ' Is the text represented in the image? ' + answer
@@ -176,9 +182,22 @@ def main(task, qa_type, model_path, fp32, multi_gpu, limit=np.inf,
                             res["adds"] = response
                             response = eval_instance(model, processor, image_file, query2)
                             res["repr"] = response
-
-
+                            
                             list_res.append(res)
+        else:
+            for _, row in tqdm(vqa_data.iterrows(), total=len(vqa_data)):
+                res = {}
+                try:
+                    image_file = url_jpg_map[row["image_url"]]
+                    query = row["multi_choice_prompt"] if qa_type == "mc" else row["open_ended_prompt"]
+                    response = eval_instance(model, processor, image_file, query, tokenizer=tokenizer)
+        
+                    res["qa_id"] = row["qa_id"]
+                    res["prediction"] = response
+                    res["lang"] = row["lang"]
+                    qa_type_txt = "answer" if qa_type == "oe" else "multi_choice_answer"
+                    res[qa_type_txt] = row[qa_type_txt]
+                    list_res.append(res)
 
                 except Exception as e:
                     _log_error(f"Error at row {row['tweet_id']} : {str(e)}", f"latest")

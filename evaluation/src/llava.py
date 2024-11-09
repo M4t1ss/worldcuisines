@@ -1,22 +1,26 @@
-from transformers import LlavaNextProcessor, LlavaNextForConditionalGeneration
+from transformers import LlavaNextProcessor, LlavaNextForConditionalGeneration, BitsAndBytesConfig
 import torch
 
 
 def load_model_processor(model_path, fp32=False, multi_gpu=False):
     processor = LlavaNextProcessor.from_pretrained(model_path)
+    quantization_config = BitsAndBytesConfig(load_in_4bit=True)
     model = LlavaNextForConditionalGeneration.from_pretrained(
         model_path,
+        quantization_config=quantization_config,
         torch_dtype=(torch.float16 if not fp32 else torch.float32),
         low_cpu_mem_usage=True,
         device_map="auto" if multi_gpu else "cuda:0",
     )
     processor.patch_size = 14
     processor.vision_feature_select_strategy = "default"
+    processor.tokenizer.padding_side = "left"
+    model.generation_config.pad_token_id = model.generation_config.eos_token_id
 
     return model, processor
 
 
-def eval_instance(model, processor, image_file, query):
+def eval_instance(model, processor, image_file, query, tokenizer=None):
     conversation = [
         {
             "role": "user",
