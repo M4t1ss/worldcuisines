@@ -151,6 +151,9 @@ def main(task, qa_type, model_path, fp32, multi_gpu, limit=np.inf,
                         with z.open(img_path) as img_file:
                             # Load the image using PIL
                             image_file = Image.open(img_file)
+                            if image_file.format == 'PNG':
+                                if image_file.mode != 'RGBA':
+                                  image_file.convert("RGBA")
 
                             if qa_type == "lv":
                                 given = 'Ņemot vērā doto tekstu no tvīta latviešu valodā: '+row["text"]

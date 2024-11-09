@@ -10,6 +10,8 @@ def load_model_processor(model_path, fp32=False, multi_gpu=False):
         low_cpu_mem_usage=True,
         device_map="auto" if multi_gpu else "cuda:0",
     )
+    processor.patch_size = 14
+    processor.vision_feature_select_strategy = "default"
 
     return model, processor
 
@@ -29,8 +31,9 @@ def eval_instance(model, processor, image_file, query):
     inputs = processor(images=image_file, text=prompt, return_tensors="pt").to("cuda:0")
     output = model.generate(
         **inputs,
-        max_new_tokens=50, 
-        do_sample=False
+        max_new_tokens=512, 
+        do_sample=True,
+        temperature=0.2,
     )
 
     out_with_template = processor.decode(output[0], skip_special_tokens=True)
