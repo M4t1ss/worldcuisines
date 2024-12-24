@@ -11,6 +11,7 @@ import os
 import zipfile
 import pandas as pd
 import re
+import csv
 
 MODEL_HANDLE = {}
 
@@ -19,11 +20,11 @@ def load_model_processor(model_path, fp32=False, multi_gpu=False):
     raise NotImplementedError
 
 
-def eval_instance(model, processor, image_file, query):
+def eval_instance(model, processor, image_file, query, seed):
     raise NotImplementedError
 
 
-def set_all_seed(seed=42):
+def set_all_seed(seed=347155):
     set_seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -54,6 +55,11 @@ def get_vqa_from_hf(task):
         vqa = load_dataset("world-cuisines/vqa", name="task2")
     elif task == 3:
         vqa = load_dataset("matiss/Latvian-Twitter-Eater-Corpus-Images")
+    elif task == 4:
+        vqa_data = pd.read_csv("found_tweets.csv")
+        vqa_data = vqa_data.head(450)
+    elif task == 5:
+        vqa_data = pd.read_csv("eval.tsv", sep='\t', header=0)
     else:
         raise ValueError(
             "Invalid task number. Please choose from 1 (dish name) or 2 (region)"
@@ -61,7 +67,7 @@ def get_vqa_from_hf(task):
 
     if task == 3:
         vqa_data = vqa["test"].to_pandas()
-    else:
+    elif task == 1 or task == 2:
         vqa_data = vqa["test_large"].to_pandas()
     return vqa_data
 
@@ -85,10 +91,18 @@ def get_unique_filename(path: str):
 def export_result(result: list, path: str, replace=False):
     """Export results to a file, ensuring unique file names."""
     path = path if replace else get_unique_filename(path)
-    with open(path, "w", encoding='utf8') as outfile:
-        for entry in result:
-            json.dump(entry, outfile, ensure_ascii=False)
-            outfile.write("\n")
+    with open(path.replace('jsonl','tsv'), 'w', newline='\n') as f_output:
+
+        keys = list(result[0].keys())
+        dict_writer = csv.DictWriter(f_output, keys, dialect='excel-tab')
+        dict_writer.writeheader()
+
+        with open(path, "w", encoding='utf8') as outfile:
+            for entry in result:
+                json.dump(entry, outfile, ensure_ascii=False)
+                outfile.write("\n")
+
+                dict_writer.writerow(entry)  
 
 
 def split_list(lst, n):
@@ -104,8 +118,8 @@ def log_error(error_message, log_file="error.txt"):
 
 
 def main(task, qa_type, model_path, fp32, multi_gpu, limit=np.inf,
-         st_idx=None, ed_idx=None, chunk_num=1, chunk_id=0):
-    set_all_seed()
+         st_idx=None, ed_idx=None, chunk_num=1, chunk_id=0, seed=347155):
+    set_all_seed(seed)
 
     if task != 3:
         kb_data = get_kb_from_hf()
@@ -127,7 +141,7 @@ def main(task, qa_type, model_path, fp32, multi_gpu, limit=np.inf,
         vqa_data = vqa_data.loc[chunk_index]
         suffix_slice += f".chunk{chunk_id}_of_{chunk_num}"
 
-    model, processor, tokenizer = load_model_processor(model_path, fp32, multi_gpu)
+    model, processor = load_model_processor(model_path, fp32, multi_gpu)
 
     list_res = []
     count = 0
@@ -140,7 +154,96 @@ def main(task, qa_type, model_path, fp32, multi_gpu, limit=np.inf,
         export_result(list_res, f"{pref}_pred_{suf}{cur_suf}.jsonl", replace=True)
 
     try:
-        if task == 3:
+        # The 350 food tweet balanced evaluation set
+        if task == 5:
+            for _, row in tqdm(vqa_data.iterrows(), total=len(vqa_data)):
+                res = {}
+                try:
+                    img_path = "eval-tweet-pics/"+str(row["tweet_id"])+".jpg"
+                    # Load the image using PIL
+                    image_file = Image.open(img_path)
+                    if image_file.format == 'PNG':
+                        if image_file.mode != 'RGBA':
+                          image_file.convert("RGBA")
+
+
+                    if qa_type == "lv":
+                        #Remove URLs from the text
+                        text = re.sub(r'^https?:\/\/.*[\r\n]*', '', row["text"], flags=re.MULTILINE)
+                        given = 'Ņemot vērā šādu tekstu, kas izgūts no tvīta latviešu valodā: \n'+text+'\n'
+                        answer = 'Atbildi “Jā” vai “Nē”.'
+                        if "meta-llama" in model_path:
+                            answer = "Noformē atbildi pēc šablona '**Atbilde:** {Jā/Nē}; **Skaidrojums:** {Motivācija šādas atbildes izvēlei}'"
+                        query1 = given + ' Vai šis attēls papildina teksta nozīmi? ' + answer
+                        query2 = given + ' Vai šis teksts tiek pārstāvēts attēlā? ' + answer
+                    elif qa_type == "en" or qa_type == "tr":
+                        if qa_type == "tr":
+                            translation = re.sub(r'^https?:\/\/.*[\r\n]*', '', row["English"], flags=re.MULTILINE)
+                            given = 'Given the following text, extracted from a tweet in English: \n'+translation+'\n'
+                        else:
+                            text = re.sub(r'^https?:\/\/.*[\r\n]*', '', row["text"], flags=re.MULTILINE)
+                            given = 'Given the following text, extracted from a tweet in Latvian: \n'+text+'\n'
+                        answer = "Reply “Yes” or “No”."
+                        if "meta-llama" in model_path:
+                            answer = "Format the answer in the pattern of '**Answer:** {YES/NO}; **EXPLANATION:** {Motivation for the choosing the answer}'"
+                        query1 = given + ' Is the image adding to the text meaning? ' + answer
+                        query2 = given + ' Is the text represented in the image? ' + answer
+
+
+                    res["id"] = row["tweet_id"]
+                    response = eval_instance(model, processor, image_file, query1, seed)
+                    res["adds"] = response
+                    response = eval_instance(model, processor, image_file, query2, seed)
+                    res["repr"] = response
+
+
+                    list_res.append(res)
+
+                except Exception as e:
+                    _log_error(f"Error at row {row['tweet_id']} : {str(e)}", f"latest")
+                    error_counter += 1
+
+                count += 1
+                if count == limit:
+                    break
+        # The 450 tweet balanced test set sampled from Vempala and Preoţiuc-Pietro, 2019
+        elif task == 4:
+            for _, row in tqdm(vqa_data.iterrows(), total=len(vqa_data)):
+                res = {}
+                try:
+                    img_path = "found-tweet-pics/"+str(row["tweet_id"])+".jpg"
+                    # Load the image using PIL
+                    image_file = Image.open(img_path)
+                    if image_file.format == 'PNG':
+                        if image_file.mode != 'RGBA':
+                          image_file.convert("RGBA")
+
+                    text = re.sub(r'^https?:\/\/.*[\r\n]*', '', row["text"], flags=re.MULTILINE)
+                    given = 'Given the following text, extracted from a tweet in English: \n'+text+'\n'
+                    answer = "Reply “Yes” or “No”."
+                    if "meta-llama" in model_path:
+                        answer = "Format the answer in the pattern of '**Answer:** {YES/NO}; **EXPLANATION:** {Motivation for the choosing the answer}'"
+                    query1 = given + ' Is the image adding to the text meaning? ' + answer
+                    query2 = given + ' Is the text represented in the image? ' + answer
+
+                    res["id"] = row["tweet_id"]
+                    response = eval_instance(model, processor, image_file, query1, seed)
+                    res["adds"] = response
+                    response = eval_instance(model, processor, image_file, query2, seed)
+                    res["repr"] = response
+
+
+                    list_res.append(res)
+
+                except Exception as e:
+                    _log_error(f"Error at row {row['tweet_id']} : {str(e)}", f"latest")
+                    error_counter += 1
+
+                count += 1
+                if count == limit:
+                    break
+        # The full food tweet evaluation set of 812 tweets
+        elif task == 3:
             if qa_type == "tr":
                 tweet_df = pd.read_csv('data.tsv', sep='\t', header=0)
             for _, row in tqdm(vqa_data.iterrows(), total=len(vqa_data)):
@@ -161,6 +264,8 @@ def main(task, qa_type, model_path, fp32, multi_gpu, limit=np.inf,
                                 text = re.sub(r'^https?:\/\/.*[\r\n]*', '', row["text"], flags=re.MULTILINE)
                                 given = 'Ņemot vērā šādu tekstu, kas izgūts no tvīta latviešu valodā: \n'+text+'\n'
                                 answer = 'Atbildi “Jā” vai “Nē”.'
+                                if "meta-llama" in model_path:
+                                    answer = "Noformē atbildi pēc šablona '**Atbilde:** {Jā/Nē}; **Skaidrojums:** {Motivācija šādas atbildes izvēlei}'"
                                 query1 = given + ' Vai šis attēls papildina teksta nozīmi? ' + answer
                                 query2 = given + ' Vai šis teksts tiek pārstāvēts attēlā? ' + answer
                             elif qa_type == "en" or qa_type == "tr":
@@ -174,30 +279,19 @@ def main(task, qa_type, model_path, fp32, multi_gpu, limit=np.inf,
                                     text = re.sub(r'^https?:\/\/.*[\r\n]*', '', row["text"], flags=re.MULTILINE)
                                     given = 'Given the following text, extracted from a tweet in Latvian: \n'+text+'\n'
                                 answer = "Reply “Yes” or “No”."
+                                if "meta-llama" in model_path:
+                                    answer = "Format the answer in the pattern of '**Answer:** {YES/NO}; **EXPLANATION:** {Motivation for the choosing the answer}'"
                                 query1 = given + ' Is the image adding to the text meaning? ' + answer
                                 query2 = given + ' Is the text represented in the image? ' + answer
 
                             res["id"] = row["tweet_id"]
-                            response = eval_instance(model, processor, image_file, query1)
+                            response = eval_instance(model, processor, image_file, query1, seed)
                             res["adds"] = response
-                            response = eval_instance(model, processor, image_file, query2)
+                            response = eval_instance(model, processor, image_file, query2, seed)
                             res["repr"] = response
-                            
+
+
                             list_res.append(res)
-        else:
-            for _, row in tqdm(vqa_data.iterrows(), total=len(vqa_data)):
-                res = {}
-                try:
-                    image_file = url_jpg_map[row["image_url"]]
-                    query = row["multi_choice_prompt"] if qa_type == "mc" else row["open_ended_prompt"]
-                    response = eval_instance(model, processor, image_file, query, tokenizer=tokenizer)
-        
-                    res["qa_id"] = row["qa_id"]
-                    res["prediction"] = response
-                    res["lang"] = row["lang"]
-                    qa_type_txt = "answer" if qa_type == "oe" else "multi_choice_answer"
-                    res[qa_type_txt] = row[qa_type_txt]
-                    list_res.append(res)
 
                 except Exception as e:
                     _log_error(f"Error at row {row['tweet_id']} : {str(e)}", f"latest")
@@ -211,9 +305,8 @@ def main(task, qa_type, model_path, fp32, multi_gpu, limit=np.inf,
                 res = {}
                 try:
                     image_file = url_jpg_map[row["image_url"]]
-                    print(row["image_url"])
                     query = row["multi_choice_prompt"] if qa_type == "mc" else row["open_ended_prompt"]
-                    response = eval_instance(model, processor, image_file, query)
+                    response = eval_instance(model, processor, image_file, query, seed)
 
                     res["qa_id"] = row["qa_id"]
                     res["prediction"] = response
@@ -232,7 +325,10 @@ def main(task, qa_type, model_path, fp32, multi_gpu, limit=np.inf,
 
     except KeyboardInterrupt:
         print("KeyboardInterrupt. Exporting latest results...")
-        _log_error(f"KeyboardInterrupt at row {row['qa_id']} ({row['lang']})", "interrupt")
+        if task == 5 or task == 4 or task == 3:
+            _log_error(f"KeyboardInterrupt at row {row['tweet_id']} ", "interrupt")
+        else:
+            _log_error(f"KeyboardInterrupt at row {row['qa_id']} ({row['lang']})", "interrupt")
 
     return list_res
 

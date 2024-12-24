@@ -1,4 +1,4 @@
-from transformers import LlavaNextProcessor, LlavaNextForConditionalGeneration, BitsAndBytesConfig
+from transformers import LlavaNextProcessor, LlavaNextForConditionalGeneration, BitsAndBytesConfig, set_seed
 import torch
 
 
@@ -20,7 +20,7 @@ def load_model_processor(model_path, fp32=False, multi_gpu=False):
     return model, processor
 
 
-def eval_instance(model, processor, image_file, query, tokenizer=None):
+def eval_instance(model, processor, image_file, query, seed):
     conversation = [
         {
             "role": "user",
@@ -31,13 +31,14 @@ def eval_instance(model, processor, image_file, query, tokenizer=None):
         },
     ]
     prompt = processor.apply_chat_template(conversation, add_generation_prompt=True)
+    set_seed(seed)
 
     inputs = processor(images=image_file, text=prompt, return_tensors="pt").to("cuda:0")
     output = model.generate(
         **inputs,
         max_new_tokens=512, 
         do_sample=True,
-        temperature=0.2,
+        temperature=0.2
     )
 
     out_with_template = processor.decode(output[0], skip_special_tokens=True)

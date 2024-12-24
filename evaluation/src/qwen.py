@@ -1,4 +1,4 @@
-from transformers import Qwen2VLForConditionalGeneration, AutoProcessor, BitsAndBytesConfig
+from transformers import Qwen2VLForConditionalGeneration, AutoProcessor, BitsAndBytesConfig, set_seed
 from qwen_vl_utils import process_vision_info
 import torch
 
@@ -21,7 +21,7 @@ def load_model_processor(model_path, fp32=False, multi_gpu=False):
     return model, processor
 
 
-def eval_instance(model, processor, image_file, query, tokenizer=None):
+def eval_instance(model, processor, image_file, query, seed):
     messages = [
         {
             "role": "user",
@@ -31,6 +31,7 @@ def eval_instance(model, processor, image_file, query, tokenizer=None):
             ],
         }
     ]
+    set_seed(seed)
     text = processor.apply_chat_template(messages, add_generation_prompt=True)
     image_inputs, _ = process_vision_info(messages)
     inputs = processor(text=[text], images=image_inputs, return_tensors="pt").to("cuda")

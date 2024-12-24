@@ -1,8 +1,9 @@
-from transformers import MllamaForConditionalGeneration, AutoProcessor, BitsAndBytesConfig
+from transformers import MllamaForConditionalGeneration, AutoProcessor, BitsAndBytesConfig, set_seed
 import torch
 from huggingface_hub import login
 from dotenv import load_dotenv
 import os
+
 load_dotenv()
 
 # Log in with your API key
@@ -11,6 +12,8 @@ login(os.environ.get("HUGGINGFACE_API_KEY"))
 def load_model_processor(model_path, fp32=False, multi_gpu=False):
     processor = AutoProcessor.from_pretrained(model_path)
     quantization_config = BitsAndBytesConfig(load_in_4bit=True)
+
+
     model = MllamaForConditionalGeneration.from_pretrained(
         model_path, 
         quantization_config=quantization_config,
@@ -23,7 +26,7 @@ def load_model_processor(model_path, fp32=False, multi_gpu=False):
     return model, processor
 
 
-def eval_instance(model, processor, image_file, query, tokenizer=None):
+def eval_instance(model, processor, image_file, query, seed):
     conversation = [
         {
             "role": "user",
@@ -34,6 +37,7 @@ def eval_instance(model, processor, image_file, query, tokenizer=None):
         },
     ]
     prompt = processor.apply_chat_template(conversation, add_generation_prompt=True)
+    set_seed(seed)
 
     inputs = processor(images=image_file, text=prompt, return_tensors="pt").to("cuda:0")
     output = model.generate(

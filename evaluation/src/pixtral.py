@@ -1,5 +1,7 @@
-from transformers import AutoModelForCausalLM, AutoProcessor, set_seed
+from transformers import AutoModelForCausalLM, AutoProcessor
 import torch
+from vllm import LLM
+from vllm.sampling_params import SamplingParams
 
 
 def load_model_processor(model_path, fp32=False, multi_gpu=False):
@@ -12,11 +14,16 @@ def load_model_processor(model_path, fp32=False, multi_gpu=False):
         trust_remote_code=True,
         torch_dtype=(torch.bfloat16 if not fp32 else torch.float32),
     )
+    
+    
+    sampling_params = SamplingParams(max_tokens=8192)
+
+    llm = LLM(model=model_path, tokenizer_mode="mistral")
 
     return model, processor
 
 
-def eval_instance(model, processor, image_file, query, seed):
+def eval_instance(model, processor, image_file, query):
     # for best performance, use num_crops=4 for multi-frame, num_crops=16 for single-frame.
     images = [image_file]
 
@@ -27,7 +34,6 @@ def eval_instance(model, processor, image_file, query, seed):
     prompt = processor.tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True
     )
-    set_seed(seed)
 
     inputs = processor(prompt, images, return_tensors="pt").to("cuda:0")
 
