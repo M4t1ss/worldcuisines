@@ -20,7 +20,7 @@ def load_model_processor(model_path, fp32=False, multi_gpu=False):
     raise NotImplementedError
 
 
-def eval_instance(model, processor, image_file, query, seed):
+def eval_instance(model, processor, image_file, query, seed, icl, icl_img):
     raise NotImplementedError
 
 
@@ -118,7 +118,7 @@ def log_error(error_message, log_file="error.txt"):
 
 
 def main(task, qa_type, model_path, fp32, multi_gpu, limit=np.inf,
-         st_idx=None, ed_idx=None, chunk_num=1, chunk_id=0, seed=347155):
+         st_idx=None, ed_idx=None, chunk_num=1, chunk_id=0, seed=347155, icl=0, icl_img=False):
     set_all_seed(seed)
 
     if task != 3:
@@ -146,6 +146,7 @@ def main(task, qa_type, model_path, fp32, multi_gpu, limit=np.inf,
     list_res = []
     count = 0
     error_counter = 0
+    url_pattern = re.compile(r'http[s]?://\S+')
 
     def _log_error(msg, suf=""):
         pref = f"./result/error/task{task}_{qa_type}_{MODEL_HANDLE[model_path]}"
@@ -169,31 +170,31 @@ def main(task, qa_type, model_path, fp32, multi_gpu, limit=np.inf,
 
                     if qa_type == "lv":
                         #Remove URLs from the text
-                        text = re.sub(r'^https?:\/\/.*[\r\n]*', '', row["text"], flags=re.MULTILINE)
+                        text = url_pattern.sub('', row["text"])
                         given = 'Ņemot vērā šādu tekstu, kas izgūts no tvīta latviešu valodā: \n'+text+'\n'
-                        answer = 'Atbildi “Jā” vai “Nē”.'
+                        answer = 'Atbildi “Jā” vai “Nē”.\n'
                         if "meta-llama" in model_path:
                             answer = "Noformē atbildi pēc šablona '**Atbilde:** {Jā/Nē}; **Skaidrojums:** {Motivācija šādas atbildes izvēlei}'"
-                        query1 = given + ' Vai šis attēls papildina teksta nozīmi? ' + answer
-                        query2 = given + ' Vai šis teksts tiek pārstāvēts attēlā? ' + answer
+                        query1 = given + 'Vai šis attēls papildina teksta nozīmi? ' + answer
+                        query2 = given + 'Vai šis teksts tiek pārstāvēts attēlā? ' + answer
                     elif qa_type == "en" or qa_type == "tr":
                         if qa_type == "tr":
-                            translation = re.sub(r'^https?:\/\/.*[\r\n]*', '', row["English"], flags=re.MULTILINE)
+                            translation = url_pattern.sub('', row["English"])
                             given = 'Given the following text, extracted from a tweet in English: \n'+translation+'\n'
                         else:
-                            text = re.sub(r'^https?:\/\/.*[\r\n]*', '', row["text"], flags=re.MULTILINE)
+                            text = url_pattern.sub('', row["text"])
                             given = 'Given the following text, extracted from a tweet in Latvian: \n'+text+'\n'
-                        answer = "Reply “Yes” or “No”."
+                        answer = "Reply “Yes” or “No”.\n"
                         if "meta-llama" in model_path:
-                            answer = "Format the answer in the pattern of '**Answer:** {YES/NO}; **EXPLANATION:** {Motivation for the choosing the answer}'"
-                        query1 = given + ' Is the image adding to the text meaning? ' + answer
-                        query2 = given + ' Is the text represented in the image? ' + answer
+                            answer = "Format the answer in the pattern of '**Answer:** {YES/NO}; **EXPLANATION:** {Motivation for the choosing the answer}'\n"
+                        query1 = given + 'Is the image adding to the text meaning? ' + answer
+                        query2 = given + 'Is the text represented in the image? ' + answer
 
 
                     res["id"] = row["tweet_id"]
-                    response = eval_instance(model, processor, image_file, query1, seed)
+                    response = eval_instance(model, processor, image_file, query1, seed, icl, icl_img)
                     res["adds"] = response
-                    response = eval_instance(model, processor, image_file, query2, seed)
+                    response = eval_instance(model, processor, image_file, query2, seed, icl, icl_img)
                     res["repr"] = response
 
 
@@ -218,7 +219,7 @@ def main(task, qa_type, model_path, fp32, multi_gpu, limit=np.inf,
                         if image_file.mode != 'RGBA':
                           image_file.convert("RGBA")
 
-                    text = re.sub(r'^https?:\/\/.*[\r\n]*', '', row["text"], flags=re.MULTILINE)
+                    text = url_pattern.sub('', row["text"])
                     given = 'Given the following text, extracted from a tweet in English: \n'+text+'\n'
                     answer = "Reply “Yes” or “No”."
                     if "meta-llama" in model_path:
@@ -227,9 +228,9 @@ def main(task, qa_type, model_path, fp32, multi_gpu, limit=np.inf,
                     query2 = given + ' Is the text represented in the image? ' + answer
 
                     res["id"] = row["tweet_id"]
-                    response = eval_instance(model, processor, image_file, query1, seed)
+                    response = eval_instance(model, processor, image_file, query1, seed, icl, icl_img)
                     res["adds"] = response
-                    response = eval_instance(model, processor, image_file, query2, seed)
+                    response = eval_instance(model, processor, image_file, query2, seed, icl, icl_img)
                     res["repr"] = response
 
 
@@ -261,7 +262,7 @@ def main(task, qa_type, model_path, fp32, multi_gpu, limit=np.inf,
 
                             if qa_type == "lv":
                                 #Remove URLs from the text
-                                text = re.sub(r'^https?:\/\/.*[\r\n]*', '', row["text"], flags=re.MULTILINE)
+                                text = url_pattern.sub('', row["text"])
                                 given = 'Ņemot vērā šādu tekstu, kas izgūts no tvīta latviešu valodā: \n'+text+'\n'
                                 answer = 'Atbildi “Jā” vai “Nē”.'
                                 if "meta-llama" in model_path:
@@ -273,10 +274,10 @@ def main(task, qa_type, model_path, fp32, multi_gpu, limit=np.inf,
                                     tweet = tweet_df[tweet_df['TweetId'] == int(row["tweet_id"])]
                                     translation = tweet["English"].values[0]
                                     #Remove URLs from the text
-                                    translation = re.sub(r'^https?:\/\/.*[\r\n]*', '', translation, flags=re.MULTILINE)
+                                    translation = url_pattern.sub('', row["translation"])
                                     given = 'Given the following text, extracted from a tweet in English: \n'+translation+'\n'
                                 else:
-                                    text = re.sub(r'^https?:\/\/.*[\r\n]*', '', row["text"], flags=re.MULTILINE)
+                                    text = url_pattern.sub('', row["text"])
                                     given = 'Given the following text, extracted from a tweet in Latvian: \n'+text+'\n'
                                 answer = "Reply “Yes” or “No”."
                                 if "meta-llama" in model_path:
@@ -285,9 +286,9 @@ def main(task, qa_type, model_path, fp32, multi_gpu, limit=np.inf,
                                 query2 = given + ' Is the text represented in the image? ' + answer
 
                             res["id"] = row["tweet_id"]
-                            response = eval_instance(model, processor, image_file, query1, seed)
+                            response = eval_instance(model, processor, image_file, query1, seed, icl, icl_img)
                             res["adds"] = response
-                            response = eval_instance(model, processor, image_file, query2, seed)
+                            response = eval_instance(model, processor, image_file, query2, seed, icl, icl_img)
                             res["repr"] = response
 
 
@@ -306,7 +307,7 @@ def main(task, qa_type, model_path, fp32, multi_gpu, limit=np.inf,
                 try:
                     image_file = url_jpg_map[row["image_url"]]
                     query = row["multi_choice_prompt"] if qa_type == "mc" else row["open_ended_prompt"]
-                    response = eval_instance(model, processor, image_file, query, seed)
+                    response = eval_instance(model, processor, image_file, query, seed, icl, icl_img)
 
                     res["qa_id"] = row["qa_id"]
                     res["prediction"] = response

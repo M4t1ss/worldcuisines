@@ -12,6 +12,8 @@ MODEL_HANDLE = {
     "llava-hf/llava-v1.6-mistral-7b-hf": "llava-1.6-m-7b",
     "llava-hf/llama3-llava-next-8b-hf": "llava-1.6-llama3-8b",
     "llava-hf/llava-v1.6-vicuna-13b-hf": "llava-1.6-13b",
+    "llava-hf/llava-v1.6-34b-hf": "llava-1.6-34b",
+    "llava-hf/llava-next-72b-hf": "llava-1.6-72b",
     
     'allenai/MolmoE-1B-0924': "molmoe-1b",
     'allenai/Molmo-7B-D-0924': "molmo-7b-d",
@@ -38,6 +40,8 @@ if __name__ == "__main__":
     parser.add_argument("-n", "--chunk_num", type=int, default=1, help="Chunks count")
     parser.add_argument("-k", "--chunk_id", type=int, default=0, help="Chunk ID (0-based)")
     parser.add_argument("-d", "--seed", type=int, default=0, help="Specify random seed")
+    parser.add_argument("-i", "--icl", type=int, default=0, help="Use in-context learning")
+    parser.add_argument("-g", "--icl_img", action="store_true", default=False, help="Use images for in-context learning")
     parser.add_argument("-s", "--st_idx", default=None, type=int, help="Slice data, start index (inclusive).")
     parser.add_argument("-e", "--ed_idx", default=None, type=int, help="Slice data, end index (exclusive).")
     parser.add_argument("--test", action="store_true", help="Set to true if in test mode.")
@@ -92,6 +96,8 @@ if __name__ == "__main__":
         chunk_num=args.chunk_num,
         chunk_id=args.chunk_id,
         seed=args.seed,
+        icl=args.icl,
+        icl_img=args.icl_img,
     )
     
     base_model.export_result(
@@ -99,7 +105,9 @@ if __name__ == "__main__":
         f"{RESULT_PATH}/task{args.task}_{args.type}_{MODEL_HANDLE[args.model_path]}_pred"  # ./result/task1_mc_qwen2-vl-72b_pred
         + ("" if args.st_idx is None else f"_s{args.st_idx}")  # ./result/task1_mc_qwen2-vl-72b_pred_s0
         + ("" if args.ed_idx is None else f"_e{args.ed_idx}")  # ./result/task1_mc_qwen2-vl-72b_pred_s0_e100
-        + ("" if args.seed is None else f"_d{args.seed}")  # ./result/task1_mc_qwen2-vl-72b_pred_s0_e100
+        + ("" if args.seed is None else f"_d{args.seed}")  # ./result/task1_mc_qwen2-vl-72b_pred_s0_e100_d347155
+        + ("" if args.icl is None else f"_i{args.icl}")  # ./result/task1_mc_qwen2-vl-72b_pred_s0_e100_d347155_i1
+        + ("" if args.icl is None or args.icl < 1 or args.icl_img is True else f"_noIMG")  # ./result/task1_mc_qwen2-vl-72b_pred_s0_e100_d347155_i1_noIMG
         + (f".chunk{args.chunk_id}_of_{args.chunk_num}" if not ((args.chunk_num == 1) and (args.chunk_id == 0)) else "")  # ./result/task1_mc_qwen2-vl-72b_pred_s0_e100.chunk0_of_1
         + (f".{os.getenv('SLURM_JOB_ID')}" if 'SLURM_JOB_ID' in os.environ else "")  # ./result/task1_mc_qwen2-vl-72b_pred_s0_e100.chunk0_of_1.1234
         + ".jsonl" # ./result/task1_mc_qwen2-vl-72b_pred_s0_e100.chunk0_of_1.1234.jsonl
