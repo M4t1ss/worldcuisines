@@ -186,9 +186,9 @@ def eval_instance(model, processor, image_file, query, seed, icl, icl_img):
             out = out_with_template[
                 out_with_template.index("ASSISTANT: ") + len("ASSISTANT: ") :
             ]
-        elif "<|im_start|> assistant\n" in out_with_template:
+        elif "assistant\n" in out_with_template:
             out = out_with_template[
-                out_with_template.index("<|im_start|> assistant\n") + len("<|im_start|> assistant\n") :
+                out_with_template.index("assistant\n") + len("assistant\n") :
             ]
         else:
             out = out_with_template

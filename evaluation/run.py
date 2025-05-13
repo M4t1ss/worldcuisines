@@ -15,18 +15,24 @@ MODEL_HANDLE = {
     "llava-hf/llava-v1.6-vicuna-13b-hf": "llava-1.6-13b",
     "llava-hf/llava-v1.6-34b-hf": "llava-1.6-34b",
     "llava-hf/llava-next-72b-hf": "llava-1.6-72b",
+    "llava-hf/llava-next-110b-hf": "llava-1.6-110b",
     
     'allenai/MolmoE-1B-0924': "molmoe-1b",
     'allenai/Molmo-7B-D-0924': "molmo-7b-d",
     'allenai/Molmo-7B-O-0924': "molmo-7b-o",
 
     "microsoft/Phi-3.5-vision-instruct": "Phi-3.5-vision-instruct",
+    "microsoft/Phi-4-multimodal-instruct": "Phi-4-multimodal-instruct",
 
     "Qwen/Qwen2-VL-2B-Instruct": "qwen-vl-2b",
     "Qwen/Qwen2-VL-7B-Instruct": "qwen2-vl-7b-instruct",
     "Qwen/Qwen2-VL-72B-Instruct": "qwen2-vl-72b",
 
     "mistralai/Pixtral-12B-2409": "pixtral-12b",
+
+    "google/gemma-3-4b-it": "gemma-4b",
+    "google/gemma-3-12b-it": "gemma-12b",
+    "google/gemma-3-27b-it": "gemma-27b",
 
     # TODO: add Proprietary models (if possible)
 }
@@ -68,6 +74,9 @@ if __name__ == "__main__":
     elif args.model_path.startswith("microsoft/Phi"):
         from src.phi import load_model_processor
         from src.phi import eval_instance
+    elif args.model_path.startswith("google/gemma"):
+        from src.gemma import load_model_processor
+        from src.gemma import eval_instance
     elif args.model_path.startswith("Qwen"):
         from src.qwen import load_model_processor
         from src.qwen import eval_instance
