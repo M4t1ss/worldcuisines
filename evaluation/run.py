@@ -1,6 +1,7 @@
 import argparse
 import os
 import src.base_model as base_model
+import yaml
 
 MODEL_HANDLE = {
     "rhymes-ai/Aria": "aria-25B-moe-4B",
@@ -30,6 +31,7 @@ MODEL_HANDLE = {
     # TODO: add Proprietary models (if possible)
 }
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Qwen2-VL Evaluation")
     parser.add_argument("--task", type=int, default=1, help="Task number to evaluate (1 or 2)")
@@ -37,6 +39,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_path", type=str, default="Qwen/Qwen2-VL-72B-Instruct", help="Model path")
     parser.add_argument("--fp32", action="store_true", default=False, help="Use float32 instead of float16/bfloat16")
     parser.add_argument("--multi_gpu", action="store_true", default=False, help="Use multiple GPUs")
+    parser.add_argument("--subset", type=str, default="large", choices=["large", "small"], help="Dataset subset to evaluate (default: large)")
     parser.add_argument("-n", "--chunk_num", type=int, default=1, help="Chunks count")
     parser.add_argument("-k", "--chunk_id", type=int, default=0, help="Chunk ID (0-based)")
     parser.add_argument("-d", "--seed", type=int, default=0, help="Specify random seed")
@@ -98,6 +101,7 @@ if __name__ == "__main__":
         seed=args.seed,
         icl=args.icl,
         icl_img=args.icl_img,
+        subset=args.subset,
     )
     
     base_model.export_result(
